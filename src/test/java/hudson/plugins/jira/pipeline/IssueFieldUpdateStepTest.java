@@ -2,8 +2,7 @@ package hudson.plugins.jira.pipeline;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertSame;
+import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -12,6 +11,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
+import com.atlassian.jira.rest.client.api.domain.input.ComplexIssueInputFieldValue;
 import hudson.EnvVars;
 import hudson.Launcher;
 import hudson.model.AbstractBuild;
@@ -90,7 +90,7 @@ public class IssueFieldUpdateStepTest {
 
         List<String> field_test = Arrays.asList("10100", "customfield_10100", "field_10100");
 
-        List<String> field_after = Arrays.asList("customfield_10100", "customfield_10100", "customfield_field_10100");
+        List<String> field_after = Arrays.asList("customfield_10100", "customfield_10100", "field_10100");
 
         IssueFieldUpdateStep jifu = new IssueFieldUpdateStep(null, null, "");
         for (int i = 0; i < field_test.size(); i++) {
@@ -111,7 +111,7 @@ public class IssueFieldUpdateStepTest {
         Random random = new Random();
         Integer randomBuildNumber = random.nextInt(85) + 15; // random number 15 < r < 99
         String issueId = "ISSUE-" + random.nextInt(1000) + 999;
-        String beforeFieldid = "field" + random.nextInt(100) + 99;
+        String beforeFieldid = "10" + random.nextInt(100) + 99;
         String beforeFieldValue = "Some comment, build #${BUILD_NUMBER}";
 
         EnvVars env = new EnvVars();
@@ -141,5 +141,13 @@ public class IssueFieldUpdateStepTest {
 
         jifu.perform(build, null, env, launcher, listener);
         assertThat(fieldsAfter.get(1).getValue().toString(), containsString("build #" + randomBuildNumber.toString()));
+    }
+
+    @Test
+    public void testParseJson() {
+        Object parsed = IssueFieldUpdateStep.parseJson("[{\"name\":\"42\"}]");
+        assertTrue(parsed instanceof List);
+        assertEquals("ComplexIssueInputFieldValue{valuesMap={name=42}}",
+            ((List<?>) parsed).get(0).toString());
     }
 }

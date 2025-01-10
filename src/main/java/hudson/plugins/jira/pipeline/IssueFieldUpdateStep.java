@@ -1,6 +1,8 @@
 package hudson.plugins.jira.pipeline;
 
 import com.atlassian.jira.rest.client.api.RestClientException;
+import com.atlassian.jira.rest.client.api.domain.input.ComplexIssueInputFieldValue;
+import com.fasterxml.jackson.core.JsonParser;
 import hudson.EnvVars;
 import hudson.Extension;
 import hudson.FilePath;
@@ -21,11 +23,13 @@ import hudson.tasks.Builder;
 import hudson.util.FormValidation;
 import java.io.IOException;
 import java.io.PrintStream;
-import java.util.Collections;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.Collectors;
 import javax.servlet.ServletException;
 import jenkins.tasks.SimpleBuildStep;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.json.JSONTokener;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
@@ -71,6 +75,17 @@ public class IssueFieldUpdateStep extends Builder implements SimpleBuildStep {
         this.fieldValue = fieldValue;
     }
 
+    public boolean isAsJson() {
+        return asJson;
+    }
+
+    @DataBoundSetter
+    public void setAsJson(boolean asJson) {
+        this.asJson = asJson;
+    }
+
+    public boolean asJson;
+
     @DataBoundConstructor
     public IssueFieldUpdateStep(AbstractIssueSelector issueSelector, String fieldId, String fieldValue) {
         this.issueSelector = issueSelector;
@@ -80,7 +95,7 @@ public class IssueFieldUpdateStep extends Builder implements SimpleBuildStep {
 
     public String prepareFieldId(String fieldId) {
         String prepared = fieldId;
-        if (!prepared.startsWith("customfield_")) {
+        if (!prepared.startsWith("customfield_") && fieldId.matches("\\d+")) {
             prepared = "customfield_" + prepared;
         }
         return prepared;
@@ -111,19 +126,50 @@ public class IssueFieldUpdateStep extends Builder implements SimpleBuildStep {
             run.setResult(Result.FAILURE);
             return;
         }
-
         Set<String> issues = selector.findIssueIds(run, site, listener);
         if (issues.isEmpty()) {
             logger.println("[Jira][IssueFieldUpdateStep] Issue list is empty!");
             return;
         }
 
+        String value = EnvironmentExpander.expandVariable(getFieldValue(), env);
+        Object objValue = asJson ? parseJson(value) : value;
         List<JiraIssueField> fields = Collections.singletonList(new JiraIssueField(
-                prepareFieldId(getFieldId()), EnvironmentExpander.expandVariable(getFieldValue(), env)));
+                prepareFieldId(getFieldId()), objValue));
 
         for (String issue : issues) {
             submitFields(session, issue, fields, logger);
         }
+    }
+
+    public static Object parseJson(String value) {
+        String trim = value.trim();
+        return trim.startsWith("[")
+            ? mapJson(new JSONArray(new JSONTokener(value)))
+            : mapJson(new JSONObject(new JSONTokener(value)));
+    }
+
+    private static Object mapJson(Object parsed) {
+        if (parsed instanceof JSONArray) {
+          JSONArray array = (JSONArray) parsed;
+          ArrayList<Object> ret = new ArrayList<>();
+            for (int i = 0; i < array.length(); i++) {
+                ret.add(mapJson(array.get(i)));
+            }
+            return ret;
+        }
+        if (parsed instanceof JSONObject) {
+          JSONObject object = (JSONObject) parsed;
+          HashMap<String, Object> ret = new HashMap<>();
+            for (String key: object.keySet()) {
+                ret.put(key, mapJson(object.get(key)));
+            }
+            return new ComplexIssueInputFieldValue(ret);
+        }
+        if (parsed instanceof Number || parsed instanceof CharSequence || parsed instanceof Boolean) {
+            return parsed;
+        }
+        throw new IllegalArgumentException("Cannot map from JSON " + parsed);
     }
 
     @Override
